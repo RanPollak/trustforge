@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  markdown-links-placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Basic structure check
+        run: |
+          test -f README.md
+          test -f LICENSE
+          test -f docs/principles.md
+          test -f specs/review-evidence.md
+          test -f examples/evidence-pr-1234.yaml
+          echo "Repository structure OK"
