@@ -1,0 +1,32 @@
+version: trustforge.dev/v0alpha1
+
+dependencies:
+  allowed_registries:
+    - pypi.org
+    - registry.npmjs.org
+  deny_unknown_sources: true
+
+repository:
+  protected_paths:
+    - .github/workflows/**
+  protected_path_action: needs_review
+
+execution:
+  privileged: false
+  host_filesystem: false
+
+network:
+  default: deny
+  allow:
+    - github.com
+    - pypi.org
+    - registry.npmjs.org
+
+security:
+  unsigned_binary:
+    action: fail
+
+architecture:
+  advisory_rules:
+    - id: preferred-auth-library
+      description: Use the repository's approved authentication abstraction.

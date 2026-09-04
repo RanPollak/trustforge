@@ -14,7 +14,7 @@ The challenge is not simply generating or reviewing code faster.
 
 The challenge is **establishing trust at scale**.
 
-TrustForge explores an open, maintainer-first approach to turn incoming software changes into structured **review evidence**:
+TrustForge explores an open, maintainer-first approach that turns incoming software changes into structured **review evidence**:
 
 ```text
 Contribution
@@ -23,9 +23,13 @@ Context
     ↓
 Triage
     ↓
-Validation
+Policy Precheck
     ↓
-Risk Analysis
+Isolated Evaluation
+    ↓
+Validation + Risk Analysis
+    ↓
+Policy Enforcement
     ↓
 Trust Evidence
     ↓
@@ -48,12 +52,13 @@ It helps maintainers get to a well-informed decision faster.
 8. **Reduce noise before adding more review output.**
 9. **Open standards and interoperable integrations.**
 10. **Measure whether we actually save maintainer time.**
+11. **Never execute untrusted contribution code without isolation.**
 
 See [docs/principles.md](docs/principles.md).
 
 ## Initial scope
 
-TrustForge v0 focuses on five capabilities:
+TrustForge v0 focuses on seven capabilities.
 
 ### 1. Context
 Build a compact, traceable picture of a contribution:
@@ -72,7 +77,26 @@ Help identify:
 - likely subsystem ownership;
 - changes needing specialist review.
 
-### 3. Validation
+### 3. Policy precheck
+Evaluate repository-defined requirements before executing untrusted code:
+- allowed dependency sources and registries;
+- protected or forbidden paths;
+- required checks and ownership;
+- repository-specific architectural rules;
+- scope rules that can be evaluated deterministically.
+
+### 4. Isolated evaluation
+Execute contributor-controlled behavior only inside a restricted environment with:
+- non-root execution;
+- restricted filesystem access;
+- default-deny or tightly controlled network egress;
+- no ambient host credentials;
+- syscall/process restrictions;
+- auditable policy-denial events.
+
+**OpenShell is the reference isolation runtime for the first TrustForge POC.** TrustForge itself remains runtime-agnostic through an isolation adapter boundary.
+
+### 5. Validation
 Collect deterministic evidence from:
 - CI;
 - tests;
@@ -82,17 +106,28 @@ Collect deterministic evidence from:
 - policy checks;
 - provenance/signing systems.
 
-### 4. Risk analysis
+### 6. Risk analysis
 Surface review-relevant risk:
 - security-sensitive code;
 - authentication/authorization changes;
 - dependency or build-system changes;
 - privileged operations;
 - unexpected generated/binary changes;
-- unusually large blast radius.
+- unusually large blast radius;
+- suspicious runtime behavior observed inside isolation.
 
-### 5. Trust evidence
+### 7. Trust evidence
 Present the evidence in a concise, auditable form for a human reviewer.
+
+## Policy outcomes
+
+TrustForge distinguishes between explicit policy enforcement and contextual review guidance:
+
+- **`PASS`** — required deterministic policy checks passed.
+- **`NEEDS_REVIEW`** — no hard policy violation was proven, but architecture, scope, security, or context requires human judgment.
+- **`POLICY_FAILED`** — an explicit machine-evaluable repository policy failed.
+
+An LLM or probabilistic finding alone cannot produce `POLICY_FAILED`.
 
 ## Explicitly out of scope for v0
 
@@ -102,6 +137,8 @@ TrustForge will **not**:
 - replace CODEOWNERS or project governance;
 - treat an LLM opinion as security evidence;
 - bypass required human review;
+- automatically close a PR based only on probabilistic/LLM judgment;
+- execute untrusted PR code on the host or with ambient credentials;
 - infer contributor trustworthiness from demographic or personal attributes.
 
 ## Example evidence object
@@ -117,10 +154,22 @@ context:
   related_changes: 2
   codeowners_resolved: true
 
+isolation:
+  runtime: openshell
+  non_root: true
+  network_default: deny
+  blocked_egress_attempts: 1
+
 validation:
   unit_tests: passed
   integration_tests: passed
   static_analysis: passed
+  dependency_checks: passed
+
+policy:
+  status: NEEDS_REVIEW
+  deterministic_failures: 0
+  advisory_findings: 1
 
 risk:
   security_sensitive_files: true
@@ -137,6 +186,21 @@ evidence:
   suspicious_patterns: none_detected
   unresolved_findings: 1
 ```
+
+## First POC: isolated PR evaluation
+
+The first end-to-end POC is intentionally concrete:
+
+> Take an untrusted pull request, evaluate it inside an isolated OpenShell sandbox under repository-defined policy, validate dependencies and runtime behavior, and return structured evidence to the maintainer.
+
+The POC should demonstrate:
+- PR-controlled build/test code cannot access host credentials;
+- unauthorized network egress is blocked and surfaced as evidence;
+- unapproved dependency sources can fail an explicit policy;
+- architecture or scope findings can request human review;
+- only deterministic, explicit repository policy can hard-fail the TrustForge check.
+
+See [prototypes/openshell-pr-evaluator/README.md](prototypes/openshell-pr-evaluator/README.md).
 
 ## Repository layout
 
@@ -155,6 +219,9 @@ trustforge/
 │   ├── principles.md
 │   ├── architecture.md
 │   ├── trust-model.md
+│   ├── isolation-model.md
+│   ├── policy-model.md
+│   ├── threat-model.md
 │   └── use-cases/
 │
 ├── research/
@@ -164,9 +231,11 @@ trustforge/
 ├── specs/
 │   ├── contribution-context.md
 │   ├── review-evidence.md
-│   └── risk-signals.md
+│   ├── risk-signals.md
+│   └── policy-decision.md
 │
 ├── prototypes/
+│   └── openshell-pr-evaluator/
 ├── examples/
 └── .github/
     ├── ISSUE_TEMPLATE/
@@ -177,7 +246,7 @@ trustforge/
 
 **Exploration / pre-alpha.**
 
-The first milestone is not to build a large AI review system. It is to validate the problem, define an interoperable review-evidence model, and test whether that model measurably reduces maintainer effort.
+The first milestone is not to build a large AI review system. It is to validate the problem, define an interoperable review-evidence model, prove that untrusted PR evaluation can be safely isolated, and test whether that model measurably reduces maintainer effort.
 
 ## Evidence behind the problem
 
@@ -197,6 +266,8 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Early contributions are especiall
 - maintainer workflows;
 - review bottleneck datasets;
 - evidence schemas;
+- isolation runtime integrations;
+- repository policy models;
 - integrations with existing CI/security tools;
 - evaluation methodology.
 
