@@ -1,0 +1,29 @@
+contribution:
+  id: PR-1234
+  subsystem: authentication
+  change_size: medium
+
+context:
+  related_issues: 3
+  related_changes: 2
+  codeowners_resolved: true
+
+validation:
+  unit_tests: passed
+  integration_tests: passed
+  static_analysis: passed
+
+risk:
+  security_sensitive_files: true
+  authentication_logic_change: true
+  dependency_change: false
+
+review:
+  required_expertise:
+    - auth-subsystem
+    - security
+
+evidence:
+  test_coverage_delta: "+4.2%"
+  suspicious_patterns: none_detected
+  unresolved_findings: 1
