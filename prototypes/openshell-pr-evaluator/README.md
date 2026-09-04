@@ -1,94 +1,165 @@
-# OpenShell PR Evaluator POC
+# Isolated PR Evidence POC
 
 ## Goal
 
-Demonstrate TrustForge's first end-to-end security workflow:
+Prove TrustForge's differentiated value through **composition**:
 
-> Take an untrusted pull request, evaluate it inside an isolated OpenShell sandbox under repository-defined policy, and return structured trust evidence to the maintainer.
+> Take an untrusted PR, evaluate relevant parts through existing open-source tools inside a controlled trust boundary, normalize their evidence, apply trusted project policy, and produce one concise maintainer-facing decision package.
 
-## Why this POC
+OpenShell is the reference isolation provider, but it is **not the entire POC**.
 
-A PR can influence executable behavior through source code, tests, build scripts, package hooks, generated code, and new dependencies. Static review alone cannot guarantee that every malicious behavior is detected before execution.
-
-Isolation therefore becomes part of the review architecture, not an implementation detail.
-
-## POC flow
+## Candidate stack
 
 ```text
 GitHub PR
-   ↓
-Trusted orchestrator reads base policy
-   ↓
-Context + cheap static/precheck policy
-   ↓
-Create OpenShell sandbox
-   ↓
-Checkout exact PR revision
-   ↓
-Install / Build / Test / Scan
-   ↓
-Collect OpenShell policy-denial/runtime events
-   ↓
-Analyze dependencies + architectural fit
-   ↓
-TrustForge Policy Decision
-   ↓
-PASS / NEEDS_REVIEW / POLICY_FAILED
-   ↓
-Structured PR check + evidence report
+   │
+   ├── metadata / CODEOWNERS
+   ├── existing CI
+   ├── Semgrep        → static analysis
+   ├── OSV-Scanner    → dependency vulnerability evidence
+   ├── OPA/Conftest   → deterministic policy
+   └── OpenShell      → isolation + runtime events
+             │
+             ▼
+      TrustForge adapters
+             │
+             ▼
+     normalized evidence
+             │
+             ▼
+PASS | NEEDS_REVIEW | POLICY_FAILED
+             │
+             ▼
+       maintainer report
 ```
 
-## Security properties to demonstrate
+These integrations are POC targets, not claimed implemented support.
 
-1. PR-controlled code runs only in the sandbox.
-2. The child workload is unprivileged/restricted by the isolation runtime.
-3. Host credentials are not available to the PR.
-4. Egress is denied by default except explicitly approved destinations.
-5. Unexpected network attempts are blocked and surfaced as evidence.
-6. Dependency source policy is enforced.
-7. A hard failure comes only from an explicit deterministic repository rule.
-8. Architectural/scope reasoning can request maintainer review but cannot independently reject the PR.
-9. Policy is loaded from a trusted base/control plane; the PR cannot weaken the policy used for its own run.
+## Why this POC matters
 
-## Demo attack cases
+A demo that only runs a PR in OpenShell would mostly demonstrate OpenShell.
 
-### A. Environment/credential probe
-A malicious test attempts to enumerate environment variables and known credential paths.
+A demo that only asks an LLM to review a diff would mostly reproduce existing PR-review tools.
 
-Expected result: no host secret is available; access denials are recorded where applicable.
+A TrustForge demo must demonstrate the missing layer:
 
-### B. Data-exfiltration attempt
-A test or package hook attempts to send data to an unauthorized destination.
+- provider selection;
+- isolation-aware orchestration;
+- normalized evidence;
+- evidence provenance;
+- trusted policy semantics;
+- uncertainty separation;
+- one maintainer-focused report.
 
-Expected result: OpenShell egress policy denies the connection; TrustForge records the denial.
+## POC phases
 
-### C. Untrusted dependency source
-The PR adds a dependency from a registry/source not allowed by repository policy.
+### Phase A — Core envelopes
 
-Expected result: `POLICY_FAILED`.
+Implement minimal:
+- contribution subject binding;
+- `EvidenceProvider` envelope;
+- `IsolationProvider` envelope;
+- review-evidence package;
+- policy decision.
 
-### D. Wrong architectural library
-The PR introduces a technically valid library that bypasses the project's preferred abstraction.
+### Phase B — Existing-tool composition
 
-If no deterministic project policy codifies the requirement, expected result: `NEEDS_REVIEW` with context and suggested reviewer.
+Connect at least:
 
-### E. Scope expansion
-The PR changes unrelated files outside the issue's expected subsystem.
+1. existing CI/test result;
+2. OSV-Scanner;
+3. Semgrep;
+4. OPA/Conftest;
+5. OpenShell.
 
-Expected result: `NEEDS_REVIEW` unless the repository has an explicit path/scope policy that makes it a hard failure.
+The POC is stronger if TrustForge writes little analysis code itself.
 
-### F. Self-weakening policy change
-The PR edits TrustForge policy or validation configuration in a way that would permit its own behavior.
+### Phase C — Adversarial fixtures
 
-Expected result: current evaluation continues using trusted base policy; the proposed policy change is reviewed as contribution data.
+Use deliberately controlled malicious/edge-case fixtures.
 
-## Implementation boundary
+#### A. Credential probe
+A malicious test attempts to enumerate environment variables/credential locations.
 
-This POC integrates OpenShell through an isolation adapter. TrustForge should not make OpenShell-specific policy syntax its core public evidence schema.
+Expected:
+- no host secret exposed;
+- runtime/isolation evidence retained.
 
-## OpenShell references
+#### B. Data exfiltration
+A package hook/test attempts unauthorized outbound traffic.
 
-- https://github.com/NVIDIA/OpenShell
-- https://github.com/NVIDIA/OpenShell/blob/main/architecture/sandbox.md
-- https://docs.nvidia.com/openshell/sandboxes/policies
-- https://github.com/NVIDIA/OpenShell/tree/main/examples/sandbox-policy-quickstart
+Expected:
+- isolation policy denies egress;
+- TrustForge records runtime evidence;
+- policy determines whether denial is hard failure or review.
+
+#### C. Vulnerable dependency
+PR introduces dependency with known OSV vulnerability.
+
+Expected:
+- OSV provider produces dependency evidence;
+- project policy maps evidence to decision.
+
+#### D. Untrusted dependency source
+PR adds package/source outside allowed registry policy.
+
+Expected:
+- deterministic policy provider reports failure;
+- TrustForge returns `POLICY_FAILED`.
+
+#### E. Static security finding
+PR adds a known pattern detected by configured Semgrep rules.
+
+Expected:
+- finding is preserved with provider provenance;
+- policy controls fail/review behavior.
+
+#### F. Architectural mismatch
+PR uses a technically valid library that bypasses preferred project abstraction.
+
+Expected:
+- if not explicitly codified: `NEEDS_REVIEW`;
+- reasoning/context never masquerades as verified evidence.
+
+#### G. Provider outage
+One provider times out.
+
+Expected:
+- `provider_timeout`, not a false clean result or fake PR violation;
+- project policy decides next step.
+
+#### H. Self-weakening policy change
+PR modifies TrustForge/project policy.
+
+Expected:
+- current run uses trusted base policy;
+- proposed policy change is reviewed as contribution data.
+
+## OpenShell trust-boundary constraint
+
+The first POC uses a trusted OpenShell/TrustForge base environment and checks out the PR after isolation is established.
+
+Do not accept arbitrary PR-supplied OCI/workload images while the trust-boundary concern tracked in NVIDIA/OpenShell issue #2750 remains applicable.
+
+Reference:
+https://github.com/NVIDIA/OpenShell/issues/2750
+
+## Success criteria
+
+The POC succeeds when:
+
+1. evidence from at least three independent existing tools is normalized;
+2. raw provider provenance remains inspectable;
+3. untrusted execution is isolated and fail-closed;
+4. deterministic policy can hard-fail;
+5. inferred/contextual findings cannot hard-fail by themselves;
+6. provider failure is distinguishable from contribution failure;
+7. the maintainer sees one concise evidence package rather than multiple disconnected tool outputs;
+8. TrustForge adds visible value without implementing its own scanner/sandbox/policy language.
+
+## Related specs
+
+- [../../specs/evidence-provider.md](../../specs/evidence-provider.md)
+- [../../specs/isolation-provider.md](../../specs/isolation-provider.md)
+- [../../specs/review-evidence.md](../../specs/review-evidence.md)
+- [../../specs/policy-decision.md](../../specs/policy-decision.md)

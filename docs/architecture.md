@@ -1,124 +1,221 @@
 # Architecture (draft)
 
-TrustForge v0 is a **review-evidence and policy-enforcement pipeline**, not a merge bot.
+TrustForge is an **evidence-orchestration layer for software contributions**.
+
+Its architecture intentionally delegates specialized analysis and isolation to existing tools.
+
+## System view
 
 ```text
-                    Untrusted Contribution
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │ Context Builder  │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │      Triage      │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │ Policy Precheck  │
-                    └────────┬─────────┘
-                             │
-                             ▼
-        ╔══════════════════════════════════════════╗
-        ║        ISOLATED EVALUATION ZONE          ║
-        ║                                          ║
-        ║  Reference runtime for POC: OpenShell    ║
-        ║                                          ║
-        ║  checkout / install / build / test       ║
-        ║  static analysis / scanners / probes     ║
-        ║                                          ║
-        ║  restricted filesystem                   ║
-        ║  non-root process                        ║
-        ║  syscall/process restrictions            ║
-        ║  controlled/default-deny network egress  ║
-        ║  no ambient host credentials             ║
-        ╚═══════════════════╤══════════════════════╝
-                            │
-                            ▼
-                  ┌──────────────────────┐
-                  │ Validation + Risk    │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │ Policy Enforcement   │
-                  │ PASS / NEEDS_REVIEW  │
-                  │ / POLICY_FAILED      │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │   Evidence Builder   │
-                  └──────────┬───────────┘
-                             │
-                             ▼
-                  ┌──────────────────────┐
-                  │ Human Maintainer     │
-                  │ Decision             │
-                  └──────────────────────┘
+                       Untrusted Contribution
+                                │
+                                ▼
+                     ┌────────────────────┐
+                     │ Context + Triage   │
+                     └─────────┬──────────┘
+                               │
+                Trusted base policy / config
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │ Provider Orchestrator│
+                    └──────────┬──────────┘
+                               │
+          ┌────────────────────┼────────────────────┐
+          │                    │                    │
+          ▼                    ▼                    ▼
+  Data-only providers   Isolated providers   External providers
+  metadata/history      build/test/scans     remote services/APIs
+          │                    │                    │
+          │            ┌───────▼────────┐           │
+          │            │ IsolationProvider│          │
+          │            │ OpenShell POC   │           │
+          │            └───────┬────────┘           │
+          │                    │                    │
+          └────────────────────┼────────────────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │ Evidence Normalizer │
+                    └──────────┬──────────┘
+                               │
+                 VERIFIED / OBSERVED /
+                   INFERRED / HUMAN
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │ Policy Decision     │
+                    │ PASS                │
+                    │ NEEDS_REVIEW        │
+                    │ POLICY_FAILED       │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │ Maintainer Report   │
+                    └─────────────────────┘
 ```
 
-## Trust boundaries
+## What belongs in TrustForge core
 
-### Trusted control plane
-Owns repository policy, orchestration, evidence schemas, and final TrustForge status. It must never treat executable state from the contribution as trusted.
+### Contribution context
+Binds all evidence to:
+- repository;
+- base revision;
+- head revision;
+- PR/patch identity;
+- changed files/subsystems;
+- relevant project ownership and policy revision.
 
-### Untrusted contribution
-The PR diff, checkout, test code, build scripts, dependency manifests, generated files, and packages fetched because of the PR are potentially attacker-controlled.
+### Provider orchestration
+Chooses which evidence providers are required based on:
+- project policy;
+- change type;
+- affected subsystem;
+- security sensitivity;
+- provider availability/capabilities.
 
-### Isolated evaluation boundary
-Anything that executes contributor-controlled behavior runs inside a restricted disposable environment.
+### Evidence normalization
+Maps provider-specific output into a portable envelope while preserving:
+- provider identity/version;
+- evidence class;
+- subject;
+- source revision;
+- raw artifact/reference;
+- confidence/uncertainty where applicable;
+- execution environment and isolation provenance.
 
-For the first POC, TrustForge uses **OpenShell** as the reference runtime. OpenShell documents overlapping isolation controls including an unprivileged child process, Landlock filesystem restrictions, seccomp restrictions, a network namespace, and policy-controlled egress.
+### Policy decision
+Maps explicit project requirements and normalized evidence to:
+- `PASS`;
+- `NEEDS_REVIEW`;
+- `POLICY_FAILED`.
 
-TrustForge should expose an `IsolationRuntime` interface so future runtimes can implement the same contract without changing the public evidence model.
+### Maintainer presentation
+Shows:
+- what is known;
+- where each result came from;
+- which policy applies;
+- what failed;
+- what remains uncertain;
+- which human expertise is needed.
 
-## Components (conceptual)
+## What does not belong in TrustForge core
 
-| Stage | Responsibility | Inputs (examples) | Outputs |
-| --- | --- | --- | --- |
-| Context | Compact, traceable picture of the change | Diff, commits, linked issues/PRs, CODEOWNERS, history | Contribution context object |
-| Triage | Route and filter | Context, size/breadth heuristics, ownership | Triage hints (duplicate, missing context, specialist needs) |
-| Policy precheck | Apply cheap explicit rules before execution | Trusted base policy, paths, dependency manifests, ownership | Precheck pass/fail/review findings |
-| Isolation | Contain contributor-controlled execution | Exact PR revision, runtime policy | Runtime evidence, denial events, artifacts |
-| Validation | Collect deterministic evidence | CI, tests, linters, SAST, deps, policy, signing | Validation results with provenance |
-| Risk analysis | Surface review-relevant risk | Paths, change types, runtime events, dependency/build diffs | Explained risk signals |
-| Policy enforcement | Map explicit rules to outcome | Deterministic evidence + policy | PASS / NEEDS_REVIEW / POLICY_FAILED |
-| Trust evidence | Assemble auditable package | All prior stages | Review-evidence artifact for humans/tools |
+TrustForge should not become:
+
+- a SAST engine;
+- a vulnerability database/scanner;
+- a policy language;
+- a signing/provenance implementation;
+- an SBOM engine;
+- a sandbox runtime;
+- a general AI code-review engine;
+- a CI system.
+
+Those capabilities belong behind provider interfaces.
+
+## Provider categories
+
+Initial categories:
+
+| Category | Example evidence |
+| --- | --- |
+| `context` | owners, history, linked issue, change metadata |
+| `ci` | test/check results |
+| `static_analysis` | code/security findings |
+| `dependency` | vulnerability/license/source findings |
+| `policy` | deterministic policy evaluation |
+| `provenance` | signatures/attestations |
+| `runtime` | network/process/filesystem observations |
+| `reasoning` | inferred architecture/scope findings |
+| `supply_chain_context` | artifact/dependency relationships |
+
+Example candidate providers include Semgrep, OSV-Scanner, OPA/Conftest, Sigstore, in-toto, GUAC, existing CI systems, ORT, and optional PR reasoning tools.
+
+Candidate integrations are documented in [ecosystem-map.md](ecosystem-map.md).
+
+## Provider execution classes
+
+Every provider declares how it can safely run.
+
+### `data_only`
+Consumes trusted API metadata, a raw diff, or other inputs without executing contribution-controlled code.
+
+### `isolated_required`
+May install packages, load project plugins, run project code, execute build/test logic, or otherwise interact with attacker-controlled executable behavior.
+
+It MUST run behind an `IsolationProvider`.
+
+### `external_service`
+Sends data to a remote service.
+
+It MUST declare:
+- what data leaves the trust boundary;
+- authentication requirements;
+- retention/privacy implications;
+- whether project policy permits that provider.
+
+## Isolation boundary
+
+OpenShell is the **reference isolation provider for the first POC**, not a core dependency.
+
+The TrustForge core interacts with a portable `IsolationProvider` contract.
+
+Anything that can trigger contribution-controlled execution must never silently fall back to the host if isolation is unavailable.
+
+See [isolation-model.md](isolation-model.md) and [../specs/isolation-provider.md](../specs/isolation-provider.md).
+
+## Evidence trust classes
+
+- **Verified** — deterministic/reproducible result with provider provenance.
+- **Observed** — fact observed from repository/runtime state.
+- **Inferred** — reasoned conclusion with evidence and uncertainty.
+- **Human** — maintainer/reviewer decision or attestation.
+
+An inferred result cannot be promoted to verified solely because multiple models agree.
 
 ## Policy semantics
 
 - **`PASS`** — all required deterministic checks passed.
-- **`NEEDS_REVIEW`** — no hard policy violation was proven, but human judgment is required.
+- **`NEEDS_REVIEW`** — no hard violation was proven, but human judgment is required.
 - **`POLICY_FAILED`** — one or more explicit machine-evaluable repository policies failed.
 
-A `POLICY_FAILED` result can be exposed as a failing repository status/check so normal branch protection can block merge. TrustForge v0 does not automatically close the PR or make the merge decision itself.
+A hard failure must trace to:
+1. trusted project policy;
+2. deterministic/provider evidence;
+3. exact contribution revision.
 
-## Deployment shapes (later)
+## First POC architecture
 
-Possible thin integrations after the model stabilizes:
+```text
+GitHub PR
+   │
+   ├── GitHub metadata / CODEOWNERS
+   ├── existing CI
+   ├── Semgrep          (candidate)
+   ├── OSV-Scanner      (candidate)
+   ├── OPA/Conftest     (candidate)
+   └── OpenShell        (reference isolation provider)
+              │
+              ▼
+      EvidenceProvider envelopes
+              │
+              ▼
+        TrustForge core
+              │
+              ▼
+       Maintainer report
+```
 
-- GitHub Action / check-run that posts or attaches an evidence artifact
-- CLI that generates evidence from a local checkout + CI outputs
-- Library adapters that map tool outputs into the evidence schema
-- Isolation-runtime adapters, with OpenShell as the first reference POC
+The POC succeeds only if TrustForge's value is visible **between** these tools: normalization, orchestration, policy semantics, provenance, and human-focused evidence.
 
 ## Architectural constraints
 
-1. No component in v0 receives authority to approve or merge a contribution.
-2. Contributor-controlled code is never executed outside the isolation boundary.
-3. An LLM finding alone cannot create a hard merge-blocking decision.
-4. Hard failures must trace back to an explicit repository policy or deterministic required check.
-5. Runtime isolation must be observable: policy denials and attempted boundary violations become review evidence.
-6. Policy used to evaluate a PR must come from a trusted base/control plane, not the untrusted PR revision.
-
-## Non-architecture (v0)
-
-- No central authority that certifies contributors
-- No required cloud service for the evidence model itself
-- No automatic merge controller
-- No OpenShell-specific public TrustForge schema; isolation is an adapter boundary
-
-See also [trust-model.md](trust-model.md), [isolation-model.md](isolation-model.md), [policy-model.md](policy-model.md), [threat-model.md](threat-model.md), and specs under [`../specs/`](../specs/).
+1. No TrustForge component receives authority to approve or merge a contribution.
+2. Contributor-controlled execution requires an isolation provider.
+3. Isolation failure fails closed.
+4. Model/inferred findings cannot independently create hard merge-blocking decisions.
+5. Hard decisions trace to trusted project policy and deterministic evidence.
+6. A PR cannot change the effective policy used for its own current evaluation.
+7. Provider-specific output is preserved for auditability but does not leak into the portable core schema unnecessarily.
+8. New engines are disfavored when a provider adapter can use a mature existing project.

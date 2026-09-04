@@ -2,82 +2,115 @@
 
 ## Assets to protect
 
-- maintainer credentials and tokens;
+- maintainer and forge credentials;
 - CI/CD credentials;
 - repository write access;
 - release/signing keys;
-- host filesystem and network;
+- host filesystem/network;
 - other workloads sharing infrastructure;
-- integrity of TrustForge policy and evidence;
+- integrity of trusted project policy;
+- integrity/provenance of evidence;
 - maintainer attention.
 
 ## Adversary-controlled inputs
 
 Assume an attacker may control:
 
-- PR source code and diff;
-- test code;
+- PR source/diff;
+- tests;
 - build scripts;
-- package manifests and lockfiles;
+- package manifests/lockfiles;
 - generated files;
-- dependency URLs and package lifecycle hooks;
-- issue/PR text consumed by models;
-- repository content reachable from the untrusted revision.
+- dependency URLs and lifecycle hooks;
+- issue/PR text consumed by reasoning providers;
+- repository content reachable from the untrusted revision;
+- provider configuration proposed inside the PR;
+- workload artifacts derived from the PR.
 
 ## Threats
 
 ### T1 — Credential theft
-Contribution code attempts to read environment variables, config files, sockets, metadata endpoints, or injected CI secrets.
+Contribution code attempts to read environment variables, config files, sockets, metadata endpoints, or CI secrets.
 
-**Controls:** no ambient credentials, least privilege, restricted filesystem/network, isolated runtime.
+**Controls:** no ambient credentials, least privilege, isolation provider, restricted filesystem/network.
 
 ### T2 — Data exfiltration
 Contribution code attempts outbound communication to an attacker-controlled service.
 
-**Controls:** default-deny/tightly scoped egress, destination policy, policy logs.
+**Controls:** default-deny/tightly scoped egress, runtime policy, event collection.
 
-### T3 — Host or sandbox escape
-Contribution code attempts privileged syscalls, raw sockets, filesystem escape, or privilege escalation.
+### T3 — Host/sandbox escape
+Contribution code attempts privileged syscalls, filesystem escape, raw sockets, or privilege escalation.
 
-**Controls:** non-root execution, capability reduction, seccomp, filesystem restrictions, disposable sandbox.
+**Controls:** replaceable isolation provider with explicit capability contract; fail closed when controls cannot be established.
 
 ### T4 — Malicious dependency behavior
-A newly introduced or compromised dependency executes during install/build/test.
+A new/compromised dependency executes during install/build/test.
 
-**Controls:** dependency-source policy, provenance where available, isolated install/build, restricted egress.
+**Controls:** dependency evidence providers, provenance when available, isolated install/build, restricted egress.
 
 ### T5 — Policy bypass
-A PR modifies the policy or workflow used to validate itself.
+A PR modifies policy/workflows used to validate itself.
 
-**Controls:** policy is loaded from the trusted base revision/control plane; changes to policy files are evaluated as data, not applied to the current run.
+**Controls:** effective policy loaded from trusted base/control plane; PR policy changes are evaluated as data.
 
 ### T6 — Prompt injection / reviewer manipulation
-PR text or repository files attempt to influence an AI-assisted reviewer to ignore rules, leak data, or approve the PR.
+PR text/repository files attempt to influence a reasoning provider to ignore rules, leak data, or approve.
 
-**Controls:** treat repository text as untrusted data, tool-level authorization, deterministic policy separation, no model authority to merge.
+**Controls:** repository text is untrusted data; model has no merge authority; deterministic evidence/policy separated.
 
 ### T7 — Evidence tampering
-Contribution-controlled code attempts to forge validation output.
+Contribution-controlled code attempts to forge scanner/test results.
 
-**Controls:** evidence collection owned by the trusted orchestrator, bind evidence to source revision and tool identity, preserve raw artifacts/logs.
+**Controls:** provider provenance; trusted orchestrator binds evidence to provider identity, exact revision, and raw artifact.
 
-### T8 — Attention exhaustion
-Low-quality or deliberately noisy contributions consume maintainer and CI capacity.
+### T8 — Provider spoofing
+A malicious adapter/result claims to be a trusted provider.
 
-**Controls:** pre-execution triage, rate/queue policy, cheap checks before expensive checks, concise evidence.
+**Controls:** provider identity/configuration comes from trusted control plane; provider result provenance is authenticated/traceable.
 
-### T9 — Architecture or dependency bypass
-A contribution introduces a technically functional library or implementation path that bypasses the project's approved abstraction, dependency policy, or subsystem ownership.
+### T9 — Provider unavailability confusion
+A provider timeout/outage is interpreted as a clean result or as proof the PR is malicious.
 
-**Controls:** explicit architecture/dependency rules where possible; otherwise evidence-backed `NEEDS_REVIEW` routed to appropriate maintainers.
+**Controls:** explicit provider-status semantics; policy decides treatment of missing evidence.
 
-## POC threat-model focus
+### T10 — Attention exhaustion
+Low-quality/noisy contributions consume maintainers and CI.
 
-The first POC should explicitly demonstrate:
+**Controls:** cheap triage before expensive providers; provider selection; concise normalized evidence.
 
-1. attempted credential/environment access does not reveal host secrets;
-2. unauthorized egress is blocked and logged;
-3. contribution-controlled build/test code executes only inside OpenShell;
-4. an unapproved dependency/source can trigger policy failure;
-5. a subjective architecture/scope finding produces `NEEDS_REVIEW`, not automatic rejection;
-6. a PR cannot weaken the trusted policy used to evaluate itself.
+### T11 — Architecture/dependency bypass
+A technically functional change bypasses approved abstractions or expected subsystem boundaries.
+
+**Controls:** deterministic rule when codified; otherwise evidence-backed `NEEDS_REVIEW`.
+
+### T12 — Isolation implementation trust gap
+The chosen sandbox runtime has its own trust boundaries and vulnerabilities.
+
+**Controls:** isolation provider is replaceable; runtime identity/version recorded; provider-specific known limitations documented; first OpenShell POC uses trusted base environment and avoids arbitrary PR-supplied workload images while relevant upstream issue #2750 remains open.
+
+## OpenShell POC note
+
+As of 2026-09-04, NVIDIA/OpenShell issue #2750 documents a trust-boundary concern where privileged supervisor setup can execute helper code from an arbitrary workload image before full workload sandboxing.
+
+The first TrustForge POC therefore:
+
+- uses a trusted OpenShell/TrustForge base environment;
+- establishes isolation before checking out/executing the PR;
+- does not accept arbitrary PR-supplied workload images as the sandbox root.
+
+Reference:
+https://github.com/NVIDIA/OpenShell/issues/2750
+
+## POC focus
+
+The first composition/adversarial POC should demonstrate:
+
+1. attempted credential access does not reveal host secrets;
+2. unauthorized egress is blocked and recorded;
+3. contribution-controlled execution happens only through isolation;
+4. unapproved dependency/source can trigger deterministic policy failure;
+5. subjective architecture/scope finding produces `NEEDS_REVIEW`;
+6. PR cannot weaken effective policy for its own run;
+7. evidence from multiple independent providers is normalized without losing provenance;
+8. provider failure remains distinguishable from contribution failure.

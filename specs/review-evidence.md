@@ -4,20 +4,99 @@ Status: **draft** (v0)
 
 ## Purpose
 
-Define the auditable package presented to a human reviewer. This is the primary TrustForge output for v0.
+Define the auditable package presented to a human reviewer.
+
+The review-evidence package is the primary TrustForge output.
 
 ## Top-level shape
 
 ```yaml
-contribution: { ... }   # see contribution-context.md
-context: { ... }
-isolation: { ... }
-validation: { ... }
-policy: { ... }          # see policy-decision.md
-risk: { ... }            # see risk-signals.md
-review: { ... }
-evidence: { ... }
+schema_version: trustforge.dev/review/v0alpha1
+
+contribution: {}
+context: {}
+
+providers:
+  runs: []
+
+isolation: {}
+
+evidence:
+  items: []
+
+policy: {}
+
+risk: {}
+
+review:
+  required_expertise: []
+  unresolved_questions: []
+
+provenance: {}
 ```
+
+## Provider runs
+
+TrustForge records which providers contributed evidence.
+
+```yaml
+providers:
+  runs:
+    - id: osv-scanner
+      category: dependency
+      status: ok
+      artifact_ref: "<raw-result>"
+
+    - id: semgrep
+      category: static_analysis
+      status: ok
+      artifact_ref: "<raw-result>"
+```
+
+See [evidence-provider.md](evidence-provider.md).
+
+## Evidence items
+
+Each item records:
+- provider;
+- evidence class;
+- kind;
+- result;
+- exact contribution revision;
+- raw artifact/reference;
+- execution/isolation context when relevant.
+
+Example:
+
+```yaml
+evidence:
+  items:
+    - provider: osv-scanner
+      class: verified
+      kind: dependency_vulnerability
+      result: no_known_vulnerability
+      subject: "<dependency>"
+
+    - provider: trustforge-context
+      class: inferred
+      kind: architectural_fit
+      result: needs_review
+      confidence: medium
+```
+
+## Evidence classes
+
+### Verified
+Deterministic/reproducible provider output with provenance.
+
+### Observed
+Fact from repository or runtime state.
+
+### Inferred
+Reasoned conclusion with evidence and uncertainty.
+
+### Human
+Maintainer/reviewer judgment or attestation.
 
 ## Isolation section
 
@@ -25,29 +104,13 @@ Records the environment in which contributor-controlled behavior was evaluated.
 
 | Field | Meaning |
 | --- | --- |
-| `runtime` | Isolation runtime identifier, e.g. `openshell` for the reference POC |
+| `provider` | Isolation provider ID |
+| `provider_version` | Runtime/provider version |
 | `non_root` | Whether contribution code ran without root privilege |
-| `network_default` | e.g. `deny`, `restricted`, `unknown` |
-| `blocked_egress_attempts` | Count or references to denied outbound attempts |
-| `credentials_exposed` | Must be `false` for compliant TrustForge POC execution |
-| `policy_revision` | Trusted isolation/policy revision used for the run |
-
-Runtime-specific details should be attached as referenced evidence rather than making the TrustForge schema dependent on one sandbox implementation.
-
-## Validation section
-
-Deterministic results only, for example:
-
-| Field | Meaning |
-| --- | --- |
-| `unit_tests` | pass / fail / not_run / unknown |
-| `integration_tests` | pass / fail / not_run / unknown |
-| `static_analysis` | pass / fail / not_run / unknown |
-| `dependency_checks` | pass / fail / not_run / unknown |
-| `policy_checks` | pass / fail / not_run / unknown |
-| `provenance` | verified / missing / not_applicable / unknown |
-
-Each validation entry SHOULD allow an optional `source` and `url` or artifact reference in future schema revisions.
+| `network_default` | `deny`, `restricted`, `unknown`, etc. |
+| `blocked_egress_attempts` | Count/references |
+| `credentials_exposed` | Must be `false` for compliant POC |
+| `policy_revision` | Trusted isolation/policy revision |
 
 ## Policy section
 
@@ -57,39 +120,36 @@ The policy decision is one of:
 - `NEEDS_REVIEW`
 - `POLICY_FAILED`
 
-`POLICY_FAILED` requires at least one failed explicit deterministic required check. Inferred/model findings alone MUST NOT produce `POLICY_FAILED`.
+`POLICY_FAILED` requires an explicit trusted project rule plus deterministic/provider evidence.
 
-See [policy-decision.md](policy-decision.md).
+Inferred/model findings alone MUST NOT produce `POLICY_FAILED`.
 
-## Review section
+## Provider failure semantics
 
-| Field | Meaning |
-| --- | --- |
-| `required_expertise` | Tags such as `auth-subsystem`, `security`, `build-system` |
-| `unresolved_questions` | Findings that require human judgment |
+Missing evidence must remain distinguishable from failed evidence.
 
-## Evidence section
+Example:
 
-Supplemental quantitative or qualitative observations that are still explainable, e.g.:
+```yaml
+providers:
+  runs:
+    - id: semgrep
+      status: provider_timeout
+```
 
-- `test_coverage_delta`
-- `suspicious_patterns`
-- `blocked_network_attempts`
-- `untrusted_dependency_sources`
-- `architectural_fit_findings`
-- `unresolved_findings`
+Project policy determines whether that missing evidence requires:
+- retry;
+- `NEEDS_REVIEW`;
+- or `POLICY_FAILED`.
 
 ## Normative rules
 
-1. Evidence packages MUST NOT include a single opaque universal trust score.
-2. Probabilistic narrative, if any, MUST be separated from deterministic validation.
-3. Security-related LLM commentary MUST NOT be labeled as validation evidence.
-4. The package MUST identify the exact contribution revision it describes.
-5. Isolation/runtime evidence MUST identify the policy revision used for execution.
-6. A hard `POLICY_FAILED` decision MUST trace to an explicit deterministic repository policy or required check.
-7. A model-only or contextual architecture/scope finding MUST remain advisory (`NEEDS_REVIEW`) unless an explicit project rule makes it deterministic.
-8. Evidence produced by contributor-controlled code MUST NOT be trusted without provenance from the trusted orchestrator/runtime.
-
-## Example
-
-See [../examples/evidence-pr-1234.yaml](../examples/evidence-pr-1234.yaml).
+1. Evidence packages MUST NOT contain a single opaque universal trust score.
+2. Verified/observed/inferred/human evidence MUST remain distinguishable.
+3. Model commentary MUST NOT be labeled as deterministic validation.
+4. The package MUST identify the exact contribution revision.
+5. Provider identity and raw evidence reference SHOULD be preserved.
+6. Isolation evidence MUST identify the isolation provider and policy revision.
+7. Hard `POLICY_FAILED` decisions MUST trace to trusted explicit policy and deterministic evidence.
+8. Provider unavailability MUST NOT be misrepresented as a contribution failure.
+9. Contribution-controlled code MUST NOT be trusted to self-attest successful validation without trusted provider provenance.

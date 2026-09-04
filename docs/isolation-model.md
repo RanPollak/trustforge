@@ -18,14 +18,15 @@ Static analysis cannot guarantee that all malicious behavior will be detected be
 
 ## Trust boundary
 
-TrustForge separates the trusted orchestrator from the untrusted evaluation environment.
-
 ```text
 Trusted control plane
-  - base repository policy
-  - orchestration
-  - evidence collection
-  - repository credentials
+  - trusted base policy
+  - provider orchestration
+  - evidence normalization
+  - forge credentials
+            │
+            ▼
+     IsolationProvider
             │
             ▼
 ┌─────────────────────────────────┐
@@ -35,42 +36,24 @@ Trusted control plane
 │ install / build / test / scan   │
 │ no ambient host credentials     │
 │ restricted filesystem           │
-│ non-root contribution process   │
+│ non-root workload               │
 │ controlled network egress       │
 └─────────────────────────────────┘
             │
             ▼
-Auditable runtime evidence
+Auditable runtime/provider evidence
 ```
 
-The PR must not be able to modify the policy used to evaluate itself. The trusted base/control plane selects the effective policy.
+The contribution must not be able to modify the effective policy used to evaluate itself.
 
-## OpenShell reference runtime
+## Runtime-agnostic contract
 
-The first TrustForge POC uses **NVIDIA OpenShell** as the reference isolation runtime.
+TrustForge core should not embed OpenShell-specific syntax.
 
-OpenShell documents overlapping sandbox controls including:
-
-- a restricted/unprivileged child process for agent/user code;
-- Landlock filesystem restrictions;
-- seccomp restrictions on dangerous syscalls;
-- network namespace routing;
-- a policy proxy that evaluates outbound access;
-- structured/logged policy denials.
-
-OpenShell's network policy model supports deny-by-default behavior and explicit host/port/binary rules, with deeper HTTP method/path enforcement for configured REST endpoints.
-
-Official references:
-- https://github.com/NVIDIA/OpenShell
-- https://github.com/NVIDIA/OpenShell/blob/main/architecture/sandbox.md
-- https://docs.nvidia.com/openshell/sandboxes/policies
-- https://github.com/NVIDIA/OpenShell/tree/main/examples/sandbox-policy-quickstart
-
-## TrustForge runtime contract
-
-TrustForge should not make OpenShell-specific syntax part of its core public schema. Instead, an `IsolationRuntime` adapter should provide capabilities such as:
+An `IsolationProvider` exposes a portable contract such as:
 
 ```text
+capabilities()
 create(revision, policy)
 execute(command)
 collect_artifacts()
@@ -78,32 +61,66 @@ collect_runtime_events()
 destroy()
 ```
 
-The runtime should return normalized evidence such as:
+See [../specs/isolation-provider.md](../specs/isolation-provider.md).
 
-- process privilege level;
-- filesystem policy applied;
-- network policy applied;
-- attempted/denied egress;
-- execution exit status;
-- raw log/artifact references;
-- runtime identity/version.
+## OpenShell reference runtime
+
+The first POC uses **NVIDIA OpenShell** as the reference isolation provider.
+
+OpenShell documents overlapping sandbox controls including:
+
+- restricted/unprivileged workload execution;
+- Landlock filesystem restrictions;
+- seccomp restrictions;
+- network namespace routing;
+- policy-controlled outbound access;
+- logged policy denials.
+
+Official references:
+
+- https://github.com/NVIDIA/OpenShell
+- https://github.com/NVIDIA/OpenShell/blob/main/architecture/sandbox.md
+- https://docs.nvidia.com/openshell/sandboxes/policies
+- https://github.com/NVIDIA/OpenShell/tree/main/examples/sandbox-policy-quickstart
+
+## Important POC constraint: trusted base image
+
+As of **2026-09-04**, OpenShell issue [#2750](https://github.com/NVIDIA/OpenShell/issues/2750) is open and documents a trust-boundary concern for **arbitrary untrusted workload images**: privileged supervisor setup can execute helper code supplied by the workload image before the workload is fully sandboxed.
+
+TrustForge should therefore make the first POC deliberately narrower:
+
+```text
+Trusted TrustForge/OpenShell base environment
+                ↓
+Isolation boundary established
+                ↓
+Privilege/network/filesystem controls established
+                ↓
+Checkout exact untrusted PR revision
+                ↓
+Install / build / test / scan
+```
+
+The first POC SHOULD NOT accept a PR-supplied arbitrary OCI/workload image as the isolation root.
+
+This constraint should be revisited when the OpenShell trust-boundary behavior changes and the relevant upstream work is complete.
 
 ## Minimum POC guarantees
 
-The first POC should demonstrate that:
-
-1. PR-controlled build/test code executes only in isolation.
-2. Host credentials are not available to the PR.
+1. PR-controlled build/test code executes only behind `IsolationProvider`.
+2. Host credentials are not available to the contribution.
 3. Unauthorized outbound network access is denied and observable.
-4. The contribution cannot weaken the trusted policy used for its own evaluation.
-5. Isolation failures fail closed rather than silently running on the host.
+4. The contribution cannot weaken trusted policy for its own evaluation.
+5. Isolation failure fails closed.
 6. Runtime denials become evidence, not automatic proof of malicious intent.
+7. The isolation provider identity/version is attached to evidence.
+8. The first OpenShell POC uses a trusted base environment rather than an arbitrary PR-supplied workload image.
 
 ## What isolation does not prove
 
 Isolation does **not** mean the contribution is safe or correct.
 
-A sandbox can limit impact while TrustForge still needs separate evidence for:
+Separate evidence is still required for:
 
 - architectural correctness;
 - logical correctness;
